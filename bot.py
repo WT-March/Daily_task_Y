@@ -153,45 +153,85 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def done_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mark task as done."""
+    """Mark task(s) as done. Supports multiple IDs: /done 1 2 3 or /done 1.2.3"""
     if not is_authorized(update):
         return
 
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /done <id>")
+    if not context.args:
+        await update.message.reply_text("Usage: /done <id> [id2 id3...] ou /done 1.2.3")
         return
 
-    task_id = int(context.args[0])
-    task = db.mark_task_done(task_id)
+    # Parse IDs - support "1 2 3" or "1.2.3" format
+    ids = []
+    for arg in context.args:
+        for part in arg.replace(",", ".").split("."):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
 
-    if task:
+    if not ids:
+        await update.message.reply_text("Usage: /done <id> [id2 id3...] ou /done 1.2.3")
+        return
+
+    # Mark all tasks as done
+    done_tasks = []
+    for task_id in ids:
+        task = db.mark_task_done(task_id)
+        if task:
+            done_tasks.append(task['title'])
+
+    if done_tasks:
         # Show confirmation and updated list
         tasks = db.get_today_tasks()
-        text = f"✅ *{task['title']}* - Fait!\n\n" + format_task_list(tasks, show_commands=False)
+        if len(done_tasks) == 1:
+            text = f"✅ *{done_tasks[0]}* - Fait!\n\n"
+        else:
+            text = f"✅ *{len(done_tasks)} taches* terminees!\n\n"
+        text += format_task_list(tasks, show_commands=False)
         await update.message.reply_text(text, parse_mode="Markdown")
     else:
-        await update.message.reply_text("Tache non trouvee.")
+        await update.message.reply_text("Aucune tache trouvee.")
 
 
 async def undone_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mark task as not done."""
+    """Mark task(s) as not done. Supports multiple IDs: /undone 1 2 3 or /undone 1.2.3"""
     if not is_authorized(update):
         return
 
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /undone <id>")
+    if not context.args:
+        await update.message.reply_text("Usage: /undone <id> [id2 id3...] ou /undone 1.2.3")
         return
 
-    task_id = int(context.args[0])
-    task = db.mark_task_undone(task_id)
+    # Parse IDs - support "1 2 3" or "1.2.3" format
+    ids = []
+    for arg in context.args:
+        for part in arg.replace(",", ".").split("."):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
 
-    if task:
+    if not ids:
+        await update.message.reply_text("Usage: /undone <id> [id2 id3...] ou /undone 1.2.3")
+        return
+
+    # Mark all tasks as undone
+    undone_tasks = []
+    for task_id in ids:
+        task = db.mark_task_undone(task_id)
+        if task:
+            undone_tasks.append(task['title'])
+
+    if undone_tasks:
         # Show confirmation and updated list
         tasks = db.get_today_tasks()
-        text = f"⬜ *{task['title']}* - A faire\n\n" + format_task_list(tasks, show_commands=False)
+        if len(undone_tasks) == 1:
+            text = f"⬜ *{undone_tasks[0]}* - A faire\n\n"
+        else:
+            text = f"⬜ *{len(undone_tasks)} taches* a faire\n\n"
+        text += format_task_list(tasks, show_commands=False)
         await update.message.reply_text(text, parse_mode="Markdown")
     else:
-        await update.message.reply_text("Tache non trouvee.")
+        await update.message.reply_text("Aucune tache trouvee.")
 
 
 async def delete_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
