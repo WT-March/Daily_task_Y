@@ -38,12 +38,27 @@ def is_authorized(update: Update) -> bool:
     return str(update.effective_chat.id) == str(config.TELEGRAM_CHAT_ID)
 
 
-def format_task_list(tasks: list) -> str:
-    """Format tasks for display."""
+def format_task_list(tasks: list, show_commands: bool = True) -> str:
+    """Format tasks for display as a checklist."""
     if not tasks:
-        return "Aucune tache pour aujourd'hui."
+        return "Aucune tache pour aujourd'hui.\n\nUtilise /add <titre> pour ajouter une tache."
 
-    lines = ["*Taches du jour:*\n"]
+    # Count completed
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["completed"])
+    pct = int((done / total) * 100) if total > 0 else 0
+
+    # Progress bar
+    bar_length = 10
+    filled = int(bar_length * done / total) if total > 0 else 0
+    bar = "█" * filled + "░" * (bar_length - filled)
+
+    lines = [
+        f"📋 *TACHES DU JOUR*",
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"Progression: {bar} {pct}% ({done}/{total})",
+        ""
+    ]
 
     # Group by category
     categories = {}
@@ -53,6 +68,13 @@ def format_task_list(tasks: list) -> str:
             categories[cat] = []
         categories[cat].append(task)
 
+    category_emoji = {
+        "Recovery": "🔋",
+        "Core": "⭐",
+        "Dynamic": "🚀",
+        "Denial": "🚫"
+    }
+
     category_names = {
         "Recovery": "Recuperation",
         "Core": "Valeur",
@@ -61,10 +83,20 @@ def format_task_list(tasks: list) -> str:
     }
 
     for cat, cat_tasks in categories.items():
-        lines.append(f"\n*{category_names.get(cat, cat)}:*")
+        emoji = category_emoji.get(cat, "📌")
+        lines.append(f"\n{emoji} *{category_names.get(cat, cat)}:*")
         for t in cat_tasks:
-            status = "v" if t["completed"] else "o"
-            lines.append(f"  [{status}] {t['id']}. {t['title']}")
+            if t["completed"]:
+                checkbox = "✅"
+                title = f"~{t['title']}~"  # Strikethrough for done
+            else:
+                checkbox = "⬜"
+                title = t['title']
+            lines.append(f"  {checkbox} `{t['id']}` {title}")
+
+    if show_commands:
+        lines.append("\n━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✏️ /done <id> · /undone <id>")
 
     return "\n".join(lines)
 
@@ -113,10 +145,11 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     title = " ".join(context.args)
     task = db.add_task(title)
-    await update.message.reply_text(
-        f"Tache ajoutee: *{task['title']}* (ID: {task['id']})",
-        parse_mode="Markdown"
-    )
+
+    # Show confirmation and updated list
+    tasks = db.get_today_tasks()
+    text = f"➕ Tache ajoutee: *{task['title']}* (ID: `{task['id']}`)\n\n" + format_task_list(tasks, show_commands=False)
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def done_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,7 +165,10 @@ async def done_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = db.mark_task_done(task_id)
 
     if task:
-        await update.message.reply_text(f"Fait: *{task['title']}*", parse_mode="Markdown")
+        # Show confirmation and updated list
+        tasks = db.get_today_tasks()
+        text = f"✅ *{task['title']}* - Fait!\n\n" + format_task_list(tasks, show_commands=False)
+        await update.message.reply_text(text, parse_mode="Markdown")
     else:
         await update.message.reply_text("Tache non trouvee.")
 
@@ -150,7 +186,10 @@ async def undone_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = db.mark_task_undone(task_id)
 
     if task:
-        await update.message.reply_text(f"Non fait: *{task['title']}*", parse_mode="Markdown")
+        # Show confirmation and updated list
+        tasks = db.get_today_tasks()
+        text = f"⬜ *{task['title']}* - A faire\n\n" + format_task_list(tasks, show_commands=False)
+        await update.message.reply_text(text, parse_mode="Markdown")
     else:
         await update.message.reply_text("Tache non trouvee.")
 
