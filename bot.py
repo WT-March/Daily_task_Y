@@ -262,16 +262,38 @@ async def send_reminder(app: Application):
 
 def main():
     """Start the bot."""
+    print("=" * 50)
+    print("PILOTAGE DE SURVIE - Starting bot...")
+    print("=" * 50)
+
+    # Check environment variables
     if not config.TELEGRAM_BOT_TOKEN:
-        print("ERROR: TELEGRAM_BOT_TOKEN not set in .env")
+        print("ERROR: TELEGRAM_BOT_TOKEN not set")
         return
 
     if not config.TELEGRAM_CHAT_ID:
-        print("ERROR: TELEGRAM_CHAT_ID not set in .env")
+        print("ERROR: TELEGRAM_CHAT_ID not set")
         return
 
     if not config.DATABASE_URL:
-        print("ERROR: DATABASE_URL not set in .env")
+        print("ERROR: DATABASE_URL not set")
+        return
+
+    print(f"Token: {config.TELEGRAM_BOT_TOKEN[:10]}...OK")
+    print(f"Chat ID: {config.TELEGRAM_CHAT_ID}...OK")
+    print(f"Database: {config.DATABASE_URL.split('@')[1] if '@' in config.DATABASE_URL else 'configured'}...OK")
+    print(f"Timezone: {config.TIMEZONE}")
+
+    # Test database connection
+    print("\nTesting database connection...")
+    try:
+        conn = db.get_connection()
+        conn.close()
+        print("Database connection: OK")
+    except Exception as e:
+        print(f"ERROR: Database connection failed: {e}")
+        print("\nCheck your DATABASE_URL format:")
+        print("  postgresql://user:password@host:5432/database")
         return
 
     # Create application
@@ -300,6 +322,10 @@ def main():
     )
     scheduler.start()
 
+    print(f"\nReminder scheduled for {config.REMINDER_HOUR}:{config.REMINDER_MINUTE:02d}")
+    print("=" * 50)
+    print("Bot is running! Send /start to your bot on Telegram")
+    print("=" * 50)
     logger.info(f"Bot started. Reminder scheduled for {config.REMINDER_HOUR}:{config.REMINDER_MINUTE:02d}")
 
     # Run bot
