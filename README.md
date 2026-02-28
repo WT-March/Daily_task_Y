@@ -4,75 +4,29 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                 SERVER (VPS - 24/7)                     │
+│              SERVER (VPS + Coolify)                     │
 │  ┌─────────────────┐      ┌─────────────────────────┐   │
 │  │  Python Bot     │◄────►│  PostgreSQL Database    │   │
-│  │  telegram_bot/  │      │                         │   │
+│  │  (Docker)       │      │  (Coolify service)      │   │
 │  └─────────────────┘      └─────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
-                                       ▲
-                                       │ sync
-                                       ▼
-                            ┌─────────────────┐
-                            │  Rust TUI App   │
-                            │  (your laptop)  │
-                            └─────────────────┘
+                                      ▲
+                                      │ sync
+                                      ▼
+                           ┌─────────────────┐
+                           │  Rust TUI App   │
+                           │  (your laptop)  │
+                           └─────────────────┘
 ```
 
-## Step 1: Get a Server
+## Prerequisites
 
-### Recommended Options:
+- A VPS with [Coolify](https://coolify.io) installed
+- A Telegram account
 
-| Provider | Price | Notes |
-|----------|-------|-------|
-| [Hetzner](https://www.hetzner.com/cloud) | ~4€/month | Best value, EU servers |
-| [DigitalOcean](https://www.digitalocean.com/) | $6/month | Easy setup |
-| [Railway.app](https://railway.app/) | Free tier | Good for testing |
-| [Render.com](https://render.com/) | Free tier | Auto-deploys |
+---
 
-### Minimum specs:
-- 1 CPU, 1GB RAM
-- Ubuntu 22.04 LTS
-
-## Step 2: Server Setup
-
-### Connect to your server:
-```bash
-ssh root@your-server-ip
-```
-
-### Install dependencies:
-```bash
-# Update system
-apt update && apt upgrade -y
-
-# Install Python 3.11+
-apt install -y python3 python3-pip python3-venv
-
-# Install PostgreSQL
-apt install -y postgresql postgresql-contrib
-```
-
-### Setup PostgreSQL:
-```bash
-# Switch to postgres user
-sudo -u postgres psql
-
-# In PostgreSQL shell:
-CREATE DATABASE pilotage_survie;
-CREATE USER pilotage WITH PASSWORD 'your_secure_password';
-GRANT ALL PRIVILEGES ON DATABASE pilotage_survie TO pilotage;
-\c pilotage_survie
-GRANT ALL ON SCHEMA public TO pilotage;
-\q
-```
-
-### Create the tables:
-```bash
-sudo -u postgres psql -d pilotage_survie -f schema.sql
-```
-
-## Step 3: Create Telegram Bot
+## Step 1: Create Telegram Bot
 
 1. Open Telegram, search for **@BotFather**
 2. Send `/newbot`
@@ -85,108 +39,127 @@ sudo -u postgres psql -d pilotage_survie -f schema.sql
 2. Send `/start`
 3. **Save your Chat ID**
 
-## Step 4: Deploy the Bot
+---
 
-### Upload files to server:
+## Step 2: Setup PostgreSQL in Coolify
+
+1. Go to your Coolify dashboard
+2. Click **+ New Resource** → **Database** → **PostgreSQL**
+3. Configure:
+   - Name: `pilotage-db`
+   - Database: `pilotage_survie`
+   - Username: `pilotage`
+   - Password: (generate a strong one)
+4. Click **Deploy**
+5. Once running, copy the **Internal URL** (looks like `postgresql://pilotage:xxx@pilotage-db:5432/pilotage_survie`)
+
+### Initialize the database:
+
+Connect to your PostgreSQL container and run `schema.sql`:
+
 ```bash
-# From your local machine
-scp -r telegram_bot/* root@your-server-ip:/opt/pilotage-bot/
+# In Coolify, open the database terminal or use:
+psql -U pilotage -d pilotage_survie
+
+# Then paste the contents of schema.sql
 ```
 
-### Setup on server:
+Or upload `schema.sql` and run:
 ```bash
-cd /opt/pilotage-bot
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file
-cp .env.example .env
-nano .env
+psql -U pilotage -d pilotage_survie -f schema.sql
 ```
 
-### Edit `.env`:
-```
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-TELEGRAM_CHAT_ID=your_chat_id
-DATABASE_URL=postgresql://pilotage:your_secure_password@localhost:5432/pilotage_survie
-TIMEZONE=Europe/Paris
-```
+---
 
-### Test the bot:
-```bash
-python bot.py
-```
+## Step 3: Deploy Bot with Coolify
 
-Send `/start` to your bot on Telegram. If it responds, it works!
+### Option A: Deploy from Git Repository
 
-## Step 5: Run as Service (systemd)
+1. Push `telegram_bot/` to a Git repo (GitHub, GitLab, etc.)
+2. In Coolify: **+ New Resource** → **Application** → **Docker**
+3. Connect your Git repository
+4. Set the build context to `telegram_bot/` (or root if separate repo)
+5. Add environment variables (see below)
+6. Deploy
 
-Create service file:
-```bash
-nano /etc/systemd/system/pilotage-bot.service
-```
+### Option B: Deploy with Docker Compose
 
-Content:
-```ini
-[Unit]
-Description=Pilotage Survie Telegram Bot
-After=network.target postgresql.service
+1. In Coolify: **+ New Resource** → **Docker Compose**
+2. Paste this configuration:
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/pilotage-bot
-ExecStart=/opt/pilotage-bot/venv/bin/python bot.py
-Restart=always
-RestartSec=10
+```yaml
+services:
+  pilotage-bot:
+    build: .
+    restart: always
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - DATABASE_URL=${DATABASE_URL}
+      - TIMEZONE=${TIMEZONE}
+    depends_on:
+      - db
 
-[Install]
-WantedBy=multi-user.target
-```
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=pilotage_survie
+      - POSTGRES_USER=pilotage
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
 
-Enable and start:
-```bash
-systemctl daemon-reload
-systemctl enable pilotage-bot
-systemctl start pilotage-bot
-
-# Check status
-systemctl status pilotage-bot
-
-# View logs
-journalctl -u pilotage-bot -f
+volumes:
+  postgres_data:
 ```
 
-## Step 6: Configure Rust App
+### Environment Variables
+
+In Coolify, add these environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `TELEGRAM_BOT_TOKEN` | Your bot token from BotFather |
+| `TELEGRAM_CHAT_ID` | Your chat ID |
+| `DATABASE_URL` | `postgresql://pilotage:PASSWORD@pilotage-db:5432/pilotage_survie` |
+| `TIMEZONE` | `Europe/Paris` |
+
+---
+
+## Step 4: Configure Rust App (Your Laptop)
 
 Create `.env` file in your Rust app folder:
-```bash
-# C:\Users\...\Pilotage de Survie & Récupération\.env
-DATABASE_URL=postgresql://pilotage:your_secure_password@your-server-ip:5432/pilotage_survie
+
+```env
+DATABASE_URL=postgresql://pilotage:your_password@your-server-ip:5432/pilotage_survie
 ```
 
-### Allow remote PostgreSQL connections:
+### Enable External PostgreSQL Access
 
-On server, edit PostgreSQL config:
+In Coolify, for your PostgreSQL service:
+
+1. Go to **Settings** → **Network**
+2. Enable **Publicly Accessible** or add a port mapping (5432)
+3. Or use Coolify's **Proxy** feature to expose the database
+
+**Alternatively, use SSH tunnel (more secure):**
 ```bash
-nano /etc/postgresql/14/main/postgresql.conf
-# Change: listen_addresses = '*'
+ssh -L 5432:localhost:5432 user@your-server-ip
+```
 
-nano /etc/postgresql/14/main/pg_hba.conf
-# Add: host all all 0.0.0.0/0 md5
-
-systemctl restart postgresql
+Then your local `.env`:
+```env
+DATABASE_URL=postgresql://pilotage:your_password@localhost:5432/pilotage_survie
 ```
 
 ### Test sync:
 ```bash
 cargo run -- --sync
 ```
+
+---
 
 ## Telegram Commands
 
@@ -202,35 +175,49 @@ cargo run -- --sync
 | `/init` | Create default tasks |
 | `/note <text>` | Add/update daily note |
 
-## Security Notes
+---
 
-1. **Never commit `.env` files** to git
-2. Use a **strong database password**
-3. Consider using **SSH tunnel** instead of exposing PostgreSQL
-4. Set up **UFW firewall** on your server
+## Coolify Tips
 
-```bash
-ufw allow 22    # SSH
-ufw allow 5432  # PostgreSQL (only if needed)
-ufw enable
-```
+### View Logs
+- Go to your application → **Logs** tab
+- Or click **Terminal** to access the container
+
+### Restart Bot
+- Click **Restart** in the application dashboard
+
+### Update Bot
+- Push changes to Git → Coolify auto-deploys (if webhook configured)
+- Or click **Redeploy** manually
+
+### Monitor Health
+- Coolify shows container status and resource usage
+- Set up notifications in Coolify settings
+
+---
 
 ## Troubleshooting
 
 ### Bot not responding:
-```bash
-journalctl -u pilotage-bot -n 50
-```
+1. Check Coolify logs for errors
+2. Verify environment variables are set correctly
+3. Test database connection from bot container
 
 ### Database connection failed:
 ```bash
-# Test locally
-psql -U pilotage -d pilotage_survie -h localhost
-
-# Test from laptop
-psql -U pilotage -d pilotage_survie -h your-server-ip
+# In bot container terminal:
+python -c "from database import get_connection; print(get_connection())"
 ```
 
 ### 21:00 reminder not sending:
-- Check timezone in `.env`
-- Check bot logs: `journalctl -u pilotage-bot -f`
+- Check `TIMEZONE` environment variable
+- Verify bot is running (check Coolify dashboard)
+
+---
+
+## Security Notes
+
+1. **Never commit `.env` files** to git
+2. Use Coolify's **Secrets** for sensitive values
+3. Keep PostgreSQL internal (not publicly exposed) if possible
+4. Use SSH tunnel for laptop connection instead of exposing port 5432
